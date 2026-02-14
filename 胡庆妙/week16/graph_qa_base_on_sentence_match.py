@@ -92,8 +92,10 @@ class GraphQA:
     def get_combinations(self, cypher_check, info):
         slot_values = []
         for key, required_count in cypher_check.items():
+            # 从序列 info[key]中，生成所有长度为 required_count 的不重复组合
             slot_values.append(itertools.combinations(info[key], required_count))
         value_combinations = itertools.product(*slot_values)
+
         combinations = []
         for value_combination in value_combinations:
             combinations.append(self.decode_value_combination(value_combination, cypher_check))
@@ -109,14 +111,15 @@ class GraphQA:
 
     # 对于单条模板，根据抽取到的实体属性信息扩展，形成一个列表
     # info:{"%ENT%":["周杰伦", "方文山"], “%REL%”:[“作曲”]}
-    def expand_templet(self, templet, cypher, cypher_check, info, answer):
+    def expand_templet(self, question, cypher, cypher_check, info, answer):
         combinations = self.get_combinations(cypher_check, info)
+        # print("combinations:", combinations)
         templet_cpyher_pair = []
         for combination in combinations:
-            replaced_templet = self.replace_token_in_string(templet, combination)
+            replaced_question = self.replace_token_in_string(question, combination)
             replaced_cypher = self.replace_token_in_string(cypher, combination)
             replaced_answer = self.replace_token_in_string(answer, combination)
-            templet_cpyher_pair.append([replaced_templet, replaced_cypher, replaced_answer])
+            templet_cpyher_pair.append([replaced_question, replaced_cypher, replaced_answer])
         return templet_cpyher_pair
 
     # 验证从文本种提取到的信息是否足够填充模板，如果不足够就跳过，节省运算速度
@@ -130,9 +133,9 @@ class GraphQA:
     # 根据提取到的实体、关系等信息，将模板展开成待匹配的问题文本
     def expand_question_and_cypher(self, info):
         templet_cypher_pair = []
-        for templet, cypher, cypher_check, answer in self.question_templet:
+        for question, cypher, cypher_check, answer in self.question_templet:
             if self.check_cypher_info_valid(info, cypher_check):
-                templet_cypher_pair += self.expand_templet(templet, cypher, cypher_check, info, answer)
+                templet_cypher_pair += self.expand_templet(question, cypher, cypher_check, info, answer)
         return templet_cypher_pair
 
     # 距离函数，文本匹配的所有方法都可以使用
@@ -156,12 +159,14 @@ class GraphQA:
 
     # 解析结果
     def parse_result(self, graph_search_result, answer):
-        graph_search_result = graph_search_result[0]
-        # 关系查找返回的结果形式较为特殊，单独处理
-        if "REL" in graph_search_result:
-            graph_search_result["REL"] = list(graph_search_result["REL"].types())[0]
-        answer = self.replace_token_in_string(answer, graph_search_result)
-        return answer
+        outputs = []
+        for rt_item in graph_search_result:
+            # 关系查找返回的结果形式较为特殊，单独处理
+            if "REL" in rt_item.keys():
+                rt_item["REL"] = list(rt_item["REL"].types())[0]
+            output = self.replace_token_in_string(answer, rt_item)
+            outputs.append(output)
+        return outputs
 
     # 对外提供问答接口
     def query(self, sentence):
@@ -173,8 +178,9 @@ class GraphQA:
             graph_search_result = self.graph.run(cypher).data()
             # 最高分命中的模板不一定在图上能找到答案, 当不能找到答案时，运行下一个搜索语句, 找到答案时停止查找后面的模板
             if graph_search_result:
-                answer = self.parse_result(graph_search_result, answer)
-                return answer
+                # print("graph_search_result:", graph_search_result, answer)
+                outputs = self.parse_result(graph_search_result, answer)
+                return ",".join(outputs)
         return None
 
 
